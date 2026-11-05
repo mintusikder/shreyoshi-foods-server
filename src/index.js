@@ -3,6 +3,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const { connectDB } = require("./config/db");
+const productRoutes = require("./routes/productRoutes");
 
 const app = express();
 
@@ -14,7 +15,20 @@ app.use(cors({
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.send("Shreyoshi Foods Server is Running!");
+  res.send("Shreyoshi Foods Server Running!");
+});
+
+app.use("/api/products", productRoutes);
+
+// Error handler for Multer and other middleware errors
+app.use((error, req, res, next) => {
+  console.error(error);
+
+  res.status(error instanceof require("multer").MulterError ? 400 : 500)
+    .json({
+      success: false,
+      message: error.message || "Something went wrong",
+    });
 });
 
 const PORT = process.env.PORT || 5000;
