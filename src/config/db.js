@@ -8,7 +8,7 @@ const connectDB = async () => {
   try {
     await client.connect();
 
-    db = client.db("shreyoshi-foods");
+    db = client.db("shreyoshi_foods_bd");
 
     console.log("MongoDB Connected Successfully!");
   } catch (error) {
