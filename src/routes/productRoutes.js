@@ -1,10 +1,23 @@
+
 const express = require("express");
 const { getDB } = require("../config/db");
-const { ObjectId } = require("mongodb");
-const cloudinary = require("../config/cloudinary");
 const upload = require("../middleware/upload");
-
+const uploadToImgBB = require("../config/imgbb");
 const router = express.Router();
+
+// Convert FormData values into correct types
+const toNumber = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const toBoolean = (value) => {
+  return value === true || value === "true";
+};
 
 // Upload image to Cloudinary
 const uploadToCloudinary = (file, folder) => {
@@ -28,37 +41,75 @@ const uploadToCloudinary = (file, folder) => {
   });
 };
 
-// Add Product
+// ADD PRODUCT
+router.post(
+  "/",
+  upload.fields([
+    { name: "mainImage", maxCount: 1 },
+    { name: "galleryImages", maxCount: 10 },
+  ]),
+  async (req, res) => {
+    try {
+      const db = getDB();
+      const products = db.collection("products");
 
-router.post("/", async (req, res) => {
-  try {
-    console.log("Received Product Data:", req.body);
+      // 1. Upload Main Image to ImgBB
+      let mainImage = null;
 
-    const db = getDB();
-    const products = db.collection("products");
+      if (req.files?.mainImage?.[0]) {
+        const uploadedMain = await uploadToImgBB(
+          req.files.mainImage[0]
+        );
 
-    const productData = {
-      ...req.body,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+        mainImage = uploadedMain.url;
+      }
 
-    const result = await products.insertOne(productData);
+      // 2. Upload Gallery Images to ImgBB
+      let galleryImages = [];
 
-    res.status(201).json({
-      success: true,
-      message: "Product added successfully",
-      insertedId: result.insertedId,
-    });
-  } catch (error) {
-    console.error("Product Insert Error:", error);
+      if (req.files?.galleryImages?.length) {
+        const uploadedGallery = await Promise.all(
+          req.files.galleryImages.map((file) =>
+            uploadToImgBB(file)
+          )
+        );
 
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+        galleryImages = uploadedGallery.map(
+          (image) => image.url
+        );
+      }
+
+      // 3. Product Data
+      const productData = {
+        ...req.body,
+
+        images: {
+          main: mainImage,
+          gallery: galleryImages,
+        },
+
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // 4. Save to MongoDB
+      const result = await products.insertOne(productData);
+
+      res.status(201).json({
+        success: true,
+        message: "Product added successfully",
+        insertedId: result.insertedId,
+      });
+
+    } catch (error) {
+      console.error("Product Insert Error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
   }
-});
-
+);
 
 module.exports = router;
