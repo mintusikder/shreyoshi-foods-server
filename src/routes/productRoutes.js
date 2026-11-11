@@ -138,4 +138,43 @@ router.get("/", async (req, res) => {
   }
 });
 
+
+// Get Single Published Product by Slug
+
+router.get("/:slug", async (req, res) => {
+  try {
+    const db = getDB();
+
+    const slug = decodeURIComponent(req.params.slug).trim();
+
+    const product = await db.collection("products").findOne({
+      slug: slug,
+      status: "published",
+    });
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+        searchedSlug: slug,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      product,
+    });
+
+  } catch (error) {
+    console.error("Get Single Product Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+
+
 module.exports = router;
