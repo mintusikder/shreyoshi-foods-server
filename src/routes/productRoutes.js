@@ -112,4 +112,30 @@ router.post(
   }
 );
 
+// Get All Products
+router.get("/", async (req, res) => {
+  try {
+    const db = getDB();
+    const products = db.collection("products");
+
+    const result = await products
+      .find({ status: "published" })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      total: result.length,
+      products: result,
+    });
+  } catch (error) {
+    console.error("Get Products Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 module.exports = router;
