@@ -1,9 +1,27 @@
 
 const express = require("express");
+const { GridFSBucket, ObjectId } = require("mongodb");
 const { getDB } = require("../config/db");
 const upload = require("../middleware/upload");
-const uploadToImgBB = require("../config/imgbb");
 const router = express.Router();
+
+const uploadProductImage = (bucket, file) =>
+  new Promise((resolve, reject) => {
+    const stream = bucket.openUploadStream(file.originalname, {
+      metadata: { contentType: file.mimetype },
+    });
+
+    stream.once("error", reject);
+    stream.once("finish", () => resolve(stream.id.toString()));
+    stream.end(file.buffer);
+  });
+
+const getProductImageUrl = (req, imageId) => {
+  const baseUrl =
+    process.env.API_BASE_URL || `${req.protocol}://${req.get("host")}`;
+
+  return `${baseUrl.replace(/\/+$/, "")}/api/products/images/${imageId}`;
+};
 
 // Convert FormData values into correct types
 const toNumber = (value) => {
@@ -19,28 +37,6 @@ const toBoolean = (value) => {
   return value === true || value === "true";
 };
 
-// Upload image to Cloudinary
-const uploadToCloudinary = (file, folder) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder: `shreyoshi-foods/${folder}`,
-        resource_type: "image",
-      },
-      (error, result) => {
-        if (error) return reject(error);
-
-        resolve({
-          url: result.secure_url,
-          publicId: result.public_id,
-        });
-      }
-    );
-
-    stream.end(file.buffer);
-  });
-};
-
 // ADD PRODUCT
 router.post(
   "/",
@@ -49,39 +45,41 @@ router.post(
     { name: "galleryImages", maxCount: 10 },
   ]),
   async (req, res) => {
+    let imageBucket;
+    const uploadedImageIds = [];
+
     try {
       const db = getDB();
       const products = db.collection("products");
+      imageBucket = new GridFSBucket(db, { bucketName: "productImages" });
 
-      // 1. Upload Main Image to ImgBB
       let mainImage = null;
 
       if (req.files?.mainImage?.[0]) {
-        const uploadedMain = await uploadToImgBB(
+        const imageId = await uploadProductImage(
+          imageBucket,
           req.files.mainImage[0]
         );
-
-        mainImage = uploadedMain.url;
+        uploadedImageIds.push(imageId);
+        mainImage = getProductImageUrl(req, imageId);
       }
 
-      // 2. Upload Gallery Images to ImgBB
       let galleryImages = [];
 
       if (req.files?.galleryImages?.length) {
-        const uploadedGallery = await Promise.all(
-          req.files.galleryImages.map((file) =>
-            uploadToImgBB(file)
-          )
-        );
-
-        galleryImages = uploadedGallery.map(
-          (image) => image.url
-        );
+        for (const file of req.files.galleryImages) {
+          const imageId = await uploadProductImage(imageBucket, file);
+          uploadedImageIds.push(imageId);
+          galleryImages.push(getProductImageUrl(req, imageId));
+        }
       }
 
-      // 3. Product Data
       const productData = {
         ...req.body,
+        slug:
+          typeof req.body.slug === "string"
+            ? req.body.slug.trim()
+            : req.body.slug,
 
         images: {
           main: mainImage,
@@ -92,8 +90,8 @@ router.post(
         updatedAt: new Date(),
       };
 
-      // 4. Save to MongoDB
       const result = await products.insertOne(productData);
+      uploadedImageIds.length = 0;
 
       res.status(201).json({
         success: true,
@@ -102,6 +100,16 @@ router.post(
       });
 
     } catch (error) {
+      if (imageBucket) {
+        for (const imageId of uploadedImageIds) {
+          try {
+            await imageBucket.delete(new ObjectId(imageId));
+          } catch (cleanupError) {
+            console.error("Product Image Cleanup Error:", cleanupError);
+          }
+        }
+      }
+
       console.error("Product Insert Error:", error);
 
       res.status(500).json({
@@ -111,6 +119,46 @@ router.post(
     }
   }
 );
+
+router.get("/images/:imageId", async (req, res, next) => {
+  try {
+    if (!ObjectId.isValid(req.params.imageId)) {
+      return res.status(404).json({
+        success: false,
+        message: "Image not found",
+      });
+    }
+
+    const db = getDB();
+    const bucket = new GridFSBucket(db, { bucketName: "productImages" });
+    const imageId = new ObjectId(req.params.imageId);
+    const file = await bucket.find({ _id: imageId }).limit(1).next();
+
+    if (!file || !file.metadata?.contentType?.startsWith("image/")) {
+      return res.status(404).json({
+        success: false,
+        message: "Image not found",
+      });
+    }
+
+    res.set("Content-Type", file.metadata.contentType);
+    res.set("Cache-Control", "public, max-age=31536000, immutable");
+    res.set("X-Content-Type-Options", "nosniff");
+
+    const downloadStream = bucket.openDownloadStream(imageId);
+    downloadStream.once("error", (error) => {
+      if (res.headersSent) {
+        res.destroy(error);
+        return;
+      }
+
+      next(error);
+    });
+    downloadStream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Get All Products
 router.get("/", async (req, res) => {
@@ -146,11 +194,21 @@ router.get("/:slug", async (req, res) => {
     const db = getDB();
 
     const slug = decodeURIComponent(req.params.slug).trim();
+    const products = db.collection("products");
 
-    const product = await db.collection("products").findOne({
+    let product = await products.findOne({
       slug: slug,
       status: "published",
     });
+
+    if (!product) {
+      product = await products.findOne({
+        status: "published",
+        $expr: {
+          $eq: [{ $trim: { input: "$slug" } }, slug],
+        },
+      });
+    }
 
     if (!product) {
       return res.status(404).json({
