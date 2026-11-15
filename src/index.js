@@ -1,36 +1,55 @@
+
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
 const { connectDB } = require("./config/db");
+
 const productRoutes = require("./routes/productRoutes");
+const homeRoutes = require("./routes/homeRoutes");
 
 const app = express();
 
-app.use(cors({
-  origin: process.env.CLIENT_URL,
-  credentials: true,
-}));
+// Middleware
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL,
+    credentials: true,
+  })
+);
 
 app.use(express.json());
 
+// Test API
 app.get("/", (req, res) => {
   res.send("Shreyoshi Foods Server Running!");
 });
 
+// API Routes
 app.use("/api/products", productRoutes);
+app.use("/api/home", homeRoutes);
 
-// Error handler for Multer and other middleware errors
+// Error Handler
 app.use((error, req, res, next) => {
-  console.error(error);
+  console.error("Server Error:", error);
 
-  res.status(error instanceof require("multer").MulterError ? 400 : 500)
-    .json({
-      success: false,
-      message: error.message || "Something went wrong",
-    });
+  const isMulterError = error.name === "MulterError";
+
+  res.status(isMulterError ? 400 : 500).json({
+    success: false,
+    message: error.message || "Something went wrong",
+  });
 });
 
+// 404 Handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// Start Server
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
@@ -41,7 +60,7 @@ const startServer = async () => {
       console.log(`Server running on port ${PORT}`);
     });
   } catch (error) {
-    console.error(error);
+    console.error("Server startup failed:", error);
     process.exit(1);
   }
 };
