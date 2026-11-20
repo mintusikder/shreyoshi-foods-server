@@ -7,6 +7,7 @@ const { connectDB } = require("./config/db");
 
 const productRoutes = require("./routes/productRoutes");
 const homeRoutes = require("./routes/homeRoutes");
+const orderRoutes = require("./routes/orderRoutes");
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.get("/", (req, res) => {
 // API Routes
 app.use("/api/products", productRoutes);
 app.use("/api/home", homeRoutes);
+app.use("/api/orders", orderRoutes);
 
 // Error Handler
 app.use((error, req, res, next) => {
