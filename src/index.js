@@ -8,6 +8,7 @@ const { connectDB } = require("./config/db");
 const productRoutes = require("./routes/productRoutes");
 const homeRoutes = require("./routes/homeRoutes");
 const orderRoutes = require("./routes/orderRoutes");
+const analyticsRoutes = require("./routes/analyticsRoutes"); // Analytics Route
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.get("/", (req, res) => {
 app.use("/api/products", productRoutes);
 app.use("/api/home", homeRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/analytics", analyticsRoutes); // Analytics API
 
 // Error Handler
 app.use((error, req, res, next) => {
