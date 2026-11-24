@@ -4,6 +4,9 @@ const { ObjectId } = require("mongodb");
 const crypto = require("crypto");
 const { getDB } = require("../config/db");
 const verifyAdmin = require("../middleware/verifyAdmin");
+const verifyAuth = require("../middleware/verifyAuth");
+
+const optionalAuth = verifyAuth.optionalAuth;
 
 const router = express.Router();
 
@@ -22,7 +25,9 @@ const allowedOrderStatuses = [
 ];
 
 // CREATE ORDER
-router.post("/", async (req, res) => {
+// Logged-in customer: save userId
+// Guest customer: allow order without userId
+router.post("/", optionalAuth, async (req, res) => {
   try {
     const db = getDB();
 
@@ -48,6 +53,7 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // Validate shipping address
     if (
       !shippingAddress ||
       !String(shippingAddress.district || "").trim() ||
@@ -60,6 +66,7 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // Validate payment method
     if (!allowedPaymentMethods.includes(paymentMethod)) {
       return res.status(400).json({
         success: false,
@@ -67,6 +74,7 @@ router.post("/", async (req, res) => {
       });
     }
 
+    // Validate items
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
         success: false,
@@ -102,10 +110,17 @@ router.post("/", async (req, res) => {
         });
       }
 
-      quantityMap.set(
-        productId,
-        (quantityMap.get(productId) || 0) + quantity
-      );
+      const newQuantity =
+        (quantityMap.get(productId) || 0) + quantity;
+
+      if (newQuantity > 100) {
+        return res.status(400).json({
+          success: false,
+          message: "একটি Product-এর সর্বোচ্চ Quantity ১০০ হতে পারবে",
+        });
+      }
+
+      quantityMap.set(productId, newQuantity);
     }
 
     const productsCollection = db.collection("products");
@@ -178,10 +193,14 @@ router.post("/", async (req, res) => {
       .toString("hex")
       .toUpperCase()}`;
 
+    // Create order
     const order = {
       orderId,
 
       customer: {
+        ...(req.user?.id
+          ? { userId: String(req.user.id) }
+          : {}),
         name: String(customer.name).trim(),
         phone: String(customer.phone).replace(/\s/g, ""),
         email: String(customer.email || "").trim(),
@@ -232,6 +251,36 @@ router.post("/", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "অর্ডার তৈরি করা যায়নি। আবার চেষ্টা করুন।",
+    });
+  }
+});
+
+// CUSTOMER: GET LOGGED-IN USER'S ORDERS
+router.get("/my", verifyAuth, async (req, res) => {
+  try {
+    const db = getDB();
+
+    const userId = String(req.user.id);
+
+    const orders = await db
+      .collection("orders")
+      .find({
+        "customer.userId": userId,
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.status(200).json({
+      success: true,
+      total: orders.length,
+      orders,
+    });
+  } catch (error) {
+    console.error("Get My Orders Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "আপনার অর্ডার লোড করা যায়নি",
     });
   }
 });
